@@ -12,6 +12,10 @@ export const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || "";
 export const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || "21m00Tcm4TlvDq8ikWAM";
 export const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY || "";
 
+export const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID || "";
+export const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || "";
+export const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER || "";
+
 export const AUDIO_DIR = path.resolve(process.env.AUDIO_DIR || path.join(__dirname, "audio_out"));
 export const TWILIO_SAMPLE_RATE = 8000;
 export const TWILIO_CHANNELS = 1;

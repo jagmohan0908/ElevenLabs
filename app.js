@@ -11,6 +11,9 @@ import { WebSocketServer } from "ws";
 import {
   BASE_URL,
   BASE_WS_URL,
+  TWILIO_ACCOUNT_SID,
+  TWILIO_AUTH_TOKEN,
+  TWILIO_PHONE_NUMBER,
   EXOTEL_ACCOUNT_SID,
   EXOTEL_API_KEY,
   EXOTEL_API_TOKEN,
@@ -223,6 +226,73 @@ app.get("/twilio/voice", async (_, reply) => {
 });
 app.post("/twilio/voice", async (_, reply) => {
   return reply.type("application/xml").send(twilioVoiceTwiML());
+});
+
+// ----- Twilio: "Call me" (outbound call for testing – no international charges) -----
+const VOICE_WEBHOOK_URL = `${BASE_URL}/twilio/voice`;
+const CALL_ME_HTML = `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Call me – AI voice</title></head>
+<body style="font-family:sans-serif;max-width:360px;margin:2rem auto;padding:1rem;">
+  <h2>Call me</h2>
+  <p>Enter your phone number (E.164, e.g. +919876543210). Twilio will call you and connect you to the AI.</p>
+  <form action="/twilio/call-me" method="get">
+    <input type="tel" name="to" placeholder="+919876543210" required style="width:100%;padding:8px;box-sizing:border-box;margin-bottom:8px;">
+    <button type="submit" style="padding:8px 16px;">Call me now</button>
+  </form>
+  <p style="color:#666;font-size:0.9rem;">Uses your Twilio number; works on trial.</p>
+</body>
+</html>`;
+
+async function twilioOutboundCall(to) {
+  const url = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Calls.json`;
+  const auth = Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString("base64");
+  const body = new URLSearchParams({
+    To: to,
+    From: TWILIO_PHONE_NUMBER,
+    Url: VOICE_WEBHOOK_URL,
+  });
+  const res = await fetch(url, {
+    method: "POST",
+    body,
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: `Basic ${auth}`,
+    },
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Twilio API: ${res.status} ${err}`);
+  }
+  return res.json();
+}
+
+app.get("/twilio/call-me", async (request, reply) => {
+  const to = (request.query?.to || "").trim();
+  if (!to) {
+    return reply.type("text/html").send(CALL_ME_HTML);
+  }
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_PHONE_NUMBER) {
+    return reply.status(500).send({
+      error: "Call-me not configured",
+      message: "Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER in .env",
+    });
+  }
+  try {
+    const call = await twilioOutboundCall(to);
+    return reply.send({
+      ok: true,
+      message: "Calling you now. Answer the phone!",
+      callSid: call.sid,
+    });
+  } catch (err) {
+    app.log.error({ err }, "Twilio call-me error");
+    return reply.status(500).send({
+      ok: false,
+      error: err.message || "Failed to start call",
+    });
+  }
 });
 
 const port = Number(process.env.PORT) || 3000;

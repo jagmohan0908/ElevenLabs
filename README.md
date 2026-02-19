@@ -57,6 +57,9 @@ Create a `.env` file:
 | `ELEVENLABS_API_KEY` | ElevenLabs API key |
 | `ELEVENLABS_VOICE_ID` | (Optional) ElevenLabs voice ID |
 | `DEEPGRAM_API_KEY` | **Required for Twilio flow.** Deepgram API key for streaming STT (mulaw 8 kHz, Hindi + English) |
+| `TWILIO_ACCOUNT_SID` | (For "Call me") From Twilio Console → Account Info |
+| `TWILIO_AUTH_TOKEN` | (For "Call me") From Twilio Console → Account Info |
+| `TWILIO_PHONE_NUMBER` | (For "Call me") Your Twilio number in E.164 (e.g. `+1234567890`) |
 
 **Exotel (optional, legacy):** `EXOTEL_*` variables only if you still use Exotel endpoints.
 
@@ -69,6 +72,16 @@ Create a `.env` file:
 3. **Voice webhook** – In Twilio Console → Phone Numbers → your number → **Voice & Fax**:
    - **A CALL COMES IN:** Webhook, `https://<BASE_URL>/twilio/voice`, HTTP GET (or POST).
 4. **Media Streams** – No extra toggle; using `<Stream>` in TwiML enables streaming.
+
+### Best testing: Twilio calls you (no international charges, works on trial)
+
+1. Set `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` in `.env` (and on Render).
+2. Open **https://&lt;BASE_URL&gt;/twilio/call-me** in a browser.
+3. Enter your phone number (E.164, e.g. `+919876543210`) and click **Call me now**.
+4. Twilio calls you; when you answer, you hear the greeting and the same AI voice flow runs.
+
+You can also trigger a call with a direct link:  
+`https://&lt;BASE_URL&gt;/twilio/call-me?to=+919876543210`
 
 **Local dev:** Use **ngrok** (or similar) so Twilio can reach your machine:
 
@@ -88,6 +101,7 @@ Set in `.env`:
 | Endpoint | Method | Purpose |
 |----------|--------|--------|
 | `/twilio/voice` | GET / POST | Twilio Voice webhook; returns TwiML with `<Stream>` + greeting. |
+| `/twilio/call-me` | GET | "Call me" test: no query = form to enter number; `?to=+123...` = start outbound call. |
 | `/twilio-stream` | WebSocket | Twilio Media Streams; receives/sends audio; runs STT → AI → TTS. |
 | `/health` | GET | Health check. |
 | `/exotel/*` | various | Optional Exotel flow (greeting, webhook, voice-loop, playback). |
