@@ -20,7 +20,7 @@ import {
   EXOTEL_CALLBACK_PLAY_RESPONSE,
   AUDIO_DIR,
 } from "./config.js";
-import { runPipeline } from "./pipeline.js";
+import { runPipeline, ensureGreetingWav } from "./pipeline.js";
 
 const STORE_TTL_MS = 10 * 60 * 1000; // 10 min
 const playbackStore = new Map(); // fromNumber -> { audioUrl, expiry }
@@ -104,6 +104,51 @@ app.get("/exotel/playback", async (request, reply) => {
       value: entry.audioUrl,
     },
   });
+});
+
+/** Build TwiML/ExoML-style XML for conversation loop: Play audio then Record, POST back to action URL. */
+function buildPlayRecordXml(playAudioUrl, recordActionUrl, maxLengthSec = 8, timeoutSec = 2) {
+  const escapedPlay = playAudioUrl.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const escapedAction = recordActionUrl.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Play>${escapedPlay}</Play>
+  <Record action="${escapedAction}" maxLength="${maxLengthSec}" timeout="${timeoutSec}" />
+</Response>`;
+}
+
+// Conversation loop: receive recording (or first hit), process, return XML with Play + Record to continue loop
+app.post("/exotel/voice-loop", async (request, reply) => {
+  const recordActionUrl = `${BASE_URL}/exotel/voice-loop`;
+  try {
+    const contentType = request.headers["content-type"] || "";
+    let data = request.body;
+    if (typeof data !== "object" || data === null) data = {};
+    if (contentType.includes("application/json") && typeof request.body === "object") {
+      data = request.body;
+    }
+    const recordingUrl = data.RecordingUrl ?? data.recording_url ?? data.RecordingSid ?? "";
+    const callSid = data.CallSid ?? data.call_sid ?? "";
+    const fromNumber = data.From ?? data.from ?? "";
+
+    let playAudioUrl;
+    if (recordingUrl && !["null", "none", ""].includes(String(recordingUrl).toLowerCase())) {
+      app.log.info({ callSid, fromNumber }, "Voice loop: processing recording");
+      const { audioId } = await runPipeline(recordingUrl);
+      playAudioUrl = `${BASE_URL}/audio/${audioId}.wav`;
+    } else {
+      app.log.info({ callSid }, "Voice loop: first request, playing greeting");
+      await ensureGreetingWav();
+      playAudioUrl = `${BASE_URL}/audio/greeting.wav`;
+    }
+    const xml = buildPlayRecordXml(playAudioUrl, recordActionUrl, 8, 2);
+    return reply.type("application/xml").send(xml);
+  } catch (err) {
+    app.log.error(err, "Voice loop error");
+    const fallbackUrl = `${BASE_URL}/audio/greeting.wav`;
+    const xml = buildPlayRecordXml(fallbackUrl, recordActionUrl, 8, 2);
+    return reply.type("application/xml").send(xml);
+  }
 });
 
 // Exotel call event callback (call end with recording_url)

@@ -120,3 +120,18 @@ export async function runPipeline(recordingUrl) {
 
   return { transcript, wavPath, audioId };
 }
+
+const GREETING_WAV_ID = "greeting";
+const GREETING_TEXT = "Hello. How can I help you today? Speak after the beep.";
+
+/** Generate and cache greeting WAV for conversation loop (8kHz mono). */
+export async function ensureGreetingWav() {
+  const wavPath = path.join(AUDIO_DIR, `${GREETING_WAV_ID}.wav`);
+  if (fs.existsSync(wavPath)) return GREETING_WAV_ID;
+  fs.mkdirSync(AUDIO_DIR, { recursive: true });
+  const mp3Buffer = await textToSpeech(GREETING_TEXT);
+  const wavBuffer = await toExotelWav(mp3Buffer);
+  fs.writeFileSync(wavPath, wavBuffer);
+  console.log("Saved greeting WAV:", wavPath);
+  return GREETING_WAV_ID;
+}

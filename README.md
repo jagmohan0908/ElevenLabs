@@ -79,12 +79,28 @@ The app includes a **Dockerfile** (Node + ffmpeg). Deploy as a **Web Service** o
 
 ---
 
+## Conversation loop (real-time back-and-forth)
+
+For a **continuous conversation** (greet → record → AI reply → record again → repeat until hangup), use the **voice-loop** endpoint. The server returns XML so the platform can **Play** the AI audio and **Record** again, then POST back to the same URL.
+
+**Flow:** Play greeting → Record caller (5–8 s) → POST to webhook → Server: STT → AI → TTS → return `<Response><Play>{AI_AUDIO_URL}</Play><Record action="{webhook}" maxLength="8" timeout="2"/></Response>` → platform plays AI voice, records again, POSTs to webhook → loop.
+
+**Endpoint:** `POST /exotel/voice-loop`
+
+- **First request (no recording):** Server returns XML with **Play** = greeting WAV URL and **Record** pointing back to `https://<BASE_URL>/exotel/voice-loop`.
+- **Later requests (with RecordingUrl):** Server downloads audio → Whisper STT → AI reply → ElevenLabs TTS → 8 kHz WAV → returns XML with **Play** = that WAV URL and **Record** again.
+
+**Exotel:** If your platform supports a **Voice URL** or **webhook that returns XML** (TwiML/ExoML-style), set it to `https://<BASE_URL>/exotel/voice-loop`. Flow: **Play greeting** (or first GET to a URL that redirects to voice-loop) → **Record** with `action=https://<BASE_URL>/exotel/voice-loop` (maxLength 8 s, timeout 2 s). When recording ends, Exotel POSTs to that URL; the server responds with the XML above to continue the loop.
+
+---
+
 ## Endpoints
 
 | Endpoint | Method | Purpose |
 |----------|--------|--------|
 | `/exotel/greeting` | GET | Exotel dynamic URL for incoming call (greeting). |
 | `/exotel/webhook` | POST | Exotel call end callback; runs pipeline and optionally calls user back. |
+| `/exotel/voice-loop` | POST | Conversation loop: receive recording, return XML `<Play>` + `<Record>` to continue. |
 | `/exotel/playback` | GET | Exotel dynamic URL for callback call (play generated WAV). |
 | `/audio/:id.wav` | GET | Serves 8kHz mono WAV files. |
 | `/health` | GET | Health check. |
