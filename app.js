@@ -1,16 +1,16 @@
 /**
- * Exotel + STT + AI + ElevenLabs voice flow (Node.js + Fastify).
+ * Real-time AI voice call agent (Twilio Media Streams) + optional Exotel flow.
  *
- * - Incoming call: Exotel GETs /exotel/greeting → we return "Please say your message and hang up."
- * - Call ends: Exotel POSTs /exotel/webhook with recording_url → we process and optionally call back.
- * - Callback: Exotel GETs /exotel/playback with From= → we return audio to play.
+ * Twilio: Incoming call → GET/POST /twilio/voice → TwiML with Stream → WSS /twilio-stream → STT → AI → TTS → caller.
  */
 import Fastify from "fastify";
 import formBody from "@fastify/formbody";
 import fs from "fs";
 import path from "path";
+import { WebSocketServer } from "ws";
 import {
   BASE_URL,
+  BASE_WS_URL,
   EXOTEL_ACCOUNT_SID,
   EXOTEL_API_KEY,
   EXOTEL_API_TOKEN,
@@ -21,6 +21,7 @@ import {
   AUDIO_DIR,
 } from "./config.js";
 import { runPipeline, ensureGreetingWav } from "./pipeline.js";
+import { handleTwilioStream } from "./twilioStream.js";
 
 const STORE_TTL_MS = 10 * 60 * 1000; // 10 min
 const playbackStore = new Map(); // fromNumber -> { audioUrl, expiry }
@@ -117,9 +118,36 @@ function buildPlayRecordXml(playAudioUrl, recordActionUrl, maxLengthSec = 8, tim
 </Response>`;
 }
 
-// Conversation loop: receive recording (or first hit), process, return XML with Play + Record to continue loop
+const VOICE_LOOP_URL = `${BASE_URL}/exotel/voice-loop`;
+
+async function handleVoiceLoopRequest(recordingUrl, callSid, fromNumber) {
+  const recordActionUrl = VOICE_LOOP_URL;
+  let playAudioUrl;
+  if (recordingUrl && !["null", "none", ""].includes(String(recordingUrl).toLowerCase())) {
+    app.log.info({ callSid, fromNumber }, "Voice loop: processing recording");
+    const { audioId } = await runPipeline(recordingUrl);
+    playAudioUrl = `${BASE_URL}/audio/${audioId}.wav`;
+  } else {
+    app.log.info({ callSid }, "Voice loop: first request, playing greeting");
+    await ensureGreetingWav();
+    playAudioUrl = `${BASE_URL}/audio/greeting.wav`;
+  }
+  return buildPlayRecordXml(playAudioUrl, recordActionUrl, 8, 2);
+}
+
+// Conversation loop: GET = initial instructions (Play greeting + Record). POST = after recording (process, then Play AI + Record).
+app.get("/exotel/voice-loop", async (request, reply) => {
+  try {
+    const xml = await handleVoiceLoopRequest("", request.query?.CallSid ?? "", request.query?.From ?? "");
+    return reply.type("application/xml").send(xml);
+  } catch (err) {
+    app.log.error(err, "Voice loop GET error");
+    const xml = buildPlayRecordXml(`${BASE_URL}/audio/greeting.wav`, VOICE_LOOP_URL, 8, 2);
+    return reply.type("application/xml").send(xml);
+  }
+});
+
 app.post("/exotel/voice-loop", async (request, reply) => {
-  const recordActionUrl = `${BASE_URL}/exotel/voice-loop`;
   try {
     const contentType = request.headers["content-type"] || "";
     let data = request.body;
@@ -130,23 +158,11 @@ app.post("/exotel/voice-loop", async (request, reply) => {
     const recordingUrl = data.RecordingUrl ?? data.recording_url ?? data.RecordingSid ?? "";
     const callSid = data.CallSid ?? data.call_sid ?? "";
     const fromNumber = data.From ?? data.from ?? "";
-
-    let playAudioUrl;
-    if (recordingUrl && !["null", "none", ""].includes(String(recordingUrl).toLowerCase())) {
-      app.log.info({ callSid, fromNumber }, "Voice loop: processing recording");
-      const { audioId } = await runPipeline(recordingUrl);
-      playAudioUrl = `${BASE_URL}/audio/${audioId}.wav`;
-    } else {
-      app.log.info({ callSid }, "Voice loop: first request, playing greeting");
-      await ensureGreetingWav();
-      playAudioUrl = `${BASE_URL}/audio/greeting.wav`;
-    }
-    const xml = buildPlayRecordXml(playAudioUrl, recordActionUrl, 8, 2);
+    const xml = await handleVoiceLoopRequest(recordingUrl, callSid, fromNumber);
     return reply.type("application/xml").send(xml);
   } catch (err) {
-    app.log.error(err, "Voice loop error");
-    const fallbackUrl = `${BASE_URL}/audio/greeting.wav`;
-    const xml = buildPlayRecordXml(fallbackUrl, recordActionUrl, 8, 2);
+    app.log.error(err, "Voice loop POST error");
+    const xml = buildPlayRecordXml(`${BASE_URL}/audio/greeting.wav`, VOICE_LOOP_URL, 8, 2);
     return reply.type("application/xml").send(xml);
   }
 });
@@ -184,7 +200,41 @@ app.get("/audio/:audioId.wav", async (request, reply) => {
 
 app.get("/health", async (_, reply) => reply.send({ status: "ok" }));
 
+// ----- Twilio: voice webhook (return TwiML with Media Stream) -----
+const TWILIO_GREETING = "Namaste, how can I help you today?";
+const TWILIO_STREAM_PATH = "/twilio-stream";
+const streamUrl = `${BASE_WS_URL.replace(/\/$/, "")}${TWILIO_STREAM_PATH}`;
+
+function twilioVoiceTwiML() {
+  const streamUrlEscaped = streamUrl.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+  const greetingEscaped = TWILIO_GREETING.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Start>
+    <Stream url="${streamUrlEscaped}" />
+  </Start>
+  <Say>${greetingEscaped}</Say>
+  <Pause length="60"/>
+</Response>`;
+}
+
+app.get("/twilio/voice", async (_, reply) => {
+  return reply.type("application/xml").send(twilioVoiceTwiML());
+});
+app.post("/twilio/voice", async (_, reply) => {
+  return reply.type("application/xml").send(twilioVoiceTwiML());
+});
+
 const port = Number(process.env.PORT) || 3000;
 const host = process.env.HOST || "0.0.0.0";
 await app.listen({ port, host });
+const server = app.server;
+
+const wss = new WebSocketServer({ server, path: TWILIO_STREAM_PATH });
+wss.on("connection", (ws) => {
+  app.log.info("Twilio Media Stream WebSocket connected");
+  handleTwilioStream(ws, app.log);
+});
+
 console.log(`Server listening on http://${host}:${port}`);
+console.log(`Twilio stream: ${streamUrl}`);

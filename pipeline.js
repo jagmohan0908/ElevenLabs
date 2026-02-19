@@ -4,7 +4,7 @@
 import fs from "fs";
 import path from "path";
 import { randomUUID } from "crypto";
-import { execFile } from "child_process";
+import { execFile, spawn } from "child_process";
 import { promisify } from "util";
 import fetch from "node-fetch";
 import OpenAI, { toFile } from "openai";
@@ -37,23 +37,31 @@ export async function speechToText(audioBuffer) {
   return typeof transcription === "string" ? transcription : transcription.text;
 }
 
+const SYSTEM_PROMPT =
+  "You are a helpful voice assistant. Reply in 1-3 short sentences. Be clear and concise for phone playback. Support Hindi and English.";
+
 export async function aiResponse(userText) {
   if (!userText || !String(userText).trim()) {
     return "I didn't catch that. Please call again and say your question clearly.";
   }
-  const r = await openai.chat.completions
-    .create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a helpful voice assistant. Reply in 1-3 short sentences. Be clear and concise for phone playback.",
-        },
-        { role: "user", content: userText },
-      ],
-      max_tokens: 150,
-    });
+  const r = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content: userText },
+    ],
+    max_tokens: 150,
+  });
+  return r.choices[0]?.message?.content || "I'm sorry, I couldn't generate a response.";
+}
+
+/** AI response with full conversation history (for real-time call context + interrupt handling). */
+export async function aiResponseWithHistory(messages) {
+  const r = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [{ role: "system", content: SYSTEM_PROMPT }, ...messages],
+    max_tokens: 150,
+  });
   return r.choices[0]?.message?.content || "I'm sorry, I couldn't generate a response.";
 }
 
@@ -71,6 +79,26 @@ export async function textToSpeech(text) {
 }
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * Convert MP3 buffer to 8kHz mono mu-law raw for Twilio Media Streams (requires ffmpeg on PATH).
+ */
+export async function mp3ToMulaw8k(mp3Buffer) {
+  return new Promise((resolve, reject) => {
+    const ff = spawn(
+      "ffmpeg",
+      ["-i", "pipe:0", "-f", "mulaw", "-ar", "8000", "-ac", "1", "pipe:1"],
+      { stdio: ["pipe", "pipe", "ignore"] }
+    );
+    const chunks = [];
+    ff.stdout.on("data", (chunk) => chunks.push(chunk));
+    ff.stdout.on("end", () => resolve(Buffer.concat(chunks)));
+    ff.on("error", reject);
+    ff.stderr.on("data", () => {});
+    ff.stdin.write(mp3Buffer);
+    ff.stdin.end();
+  });
+}
 
 /**
  * Convert MP3 buffer to 8kHz mono 16-bit WAV for Exotel (requires ffmpeg on PATH).

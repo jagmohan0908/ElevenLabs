@@ -1,7 +1,7 @@
 {
-  "name": "exotel-voice-ai",
-  "version": "1.0.0",
-  "description": "Exotel + STT + AI + ElevenLabs voice flow (Node.js)",
+  "name": "twilio-voice-ai",
+  "version": "2.0.0",
+  "description": "Real-time AI voice call agent (Twilio + Deepgram + OpenAI + ElevenLabs)",
   "type": "module",
   "main": "app.js",
   "scripts": {
@@ -9,11 +9,13 @@
     "dev": "node --watch app.js"
   },
   "dependencies": {
+    "@deepgram/sdk": "^3.0.0",
+    "@elevenlabs/elevenlabs-js": "^2.0.0",
+    "@fastify/formbody": "^8.0.1",
     "dotenv": "^16.4.5",
     "fastify": "^5.1.0",
-    "@fastify/formbody": "^8.0.1",
-    "@elevenlabs/elevenlabs-js": "^2.0.0",
+    "node-fetch": "^3.3.2",
     "openai": "^4.73.0",
-    "node-fetch": "^3.3.2"
+    "ws": "^8.18.0"
   }
 }
