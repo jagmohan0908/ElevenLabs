@@ -68,6 +68,24 @@ export async function aiResponseWithHistory(messages) {
 /** Default voice that works on ElevenLabs free tier (Rachel). Library voices need a paid plan. */
 const FREE_TIER_VOICE_ID = "21m00Tcm4TlvDq8ikWAM";
 
+/** Free fallback TTS when ElevenLabs returns 401/403 (e.g. from cloud/datacenter). Uses Google Translate TTS. */
+async function googleTtsFallback(text, lang = "hi") {
+  const maxChunk = 200;
+  const chunks = [];
+  for (let i = 0; i < text.length; i += maxChunk) {
+    const part = text.slice(i, i + maxChunk);
+    const q = encodeURIComponent(part);
+    const url = `https://translate.google.com/translate_tts?ie=UTF-8&tl=${lang}&client=tw-ob&q=${q}`;
+    const res = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0" },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) throw new Error(`Google TTS: ${res.status}`);
+    chunks.push(Buffer.from(await res.arrayBuffer()));
+  }
+  return Buffer.concat(chunks);
+}
+
 export async function textToSpeech(text, voiceIdOverride = null) {
   const voiceId = voiceIdOverride ?? ELEVENLABS_VOICE_ID ?? FREE_TIER_VOICE_ID;
   try {
@@ -83,6 +101,9 @@ export async function textToSpeech(text, voiceIdOverride = null) {
   } catch (err) {
     if (err?.statusCode === 402 && voiceId !== FREE_TIER_VOICE_ID) {
       return textToSpeech(text, FREE_TIER_VOICE_ID);
+    }
+    if (err?.statusCode === 401 || err?.statusCode === 403) {
+      return googleTtsFallback(text, "hi");
     }
     throw err;
   }
