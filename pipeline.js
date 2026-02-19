@@ -65,17 +65,27 @@ export async function aiResponseWithHistory(messages) {
   return r.choices[0]?.message?.content || "I'm sorry, I couldn't generate a response.";
 }
 
-export async function textToSpeech(text) {
-  const voiceId = ELEVENLABS_VOICE_ID || "21m00Tcm4TlvDq8ikWAM";
-  const result = await elevenlabs.textToSpeech.convert(voiceId, {
-    text,
-    modelId: "eleven_turbo_v2_5",
-  });
-  if (Buffer.isBuffer(result)) return result;
-  if (result instanceof Uint8Array) return Buffer.from(result);
-  const chunks = [];
-  for await (const chunk of result) chunks.push(Buffer.from(chunk));
-  return Buffer.concat(chunks);
+/** Default voice that works on ElevenLabs free tier (Rachel). Library voices need a paid plan. */
+const FREE_TIER_VOICE_ID = "21m00Tcm4TlvDq8ikWAM";
+
+export async function textToSpeech(text, voiceIdOverride = null) {
+  const voiceId = voiceIdOverride ?? ELEVENLABS_VOICE_ID ?? FREE_TIER_VOICE_ID;
+  try {
+    const result = await elevenlabs.textToSpeech.convert(voiceId, {
+      text,
+      modelId: "eleven_turbo_v2_5",
+    });
+    if (Buffer.isBuffer(result)) return result;
+    if (result instanceof Uint8Array) return Buffer.from(result);
+    const chunks = [];
+    for await (const chunk of result) chunks.push(Buffer.from(chunk));
+    return Buffer.concat(chunks);
+  } catch (err) {
+    if (err?.statusCode === 402 && voiceId !== FREE_TIER_VOICE_ID) {
+      return textToSpeech(text, FREE_TIER_VOICE_ID);
+    }
+    throw err;
+  }
 }
 
 const execFileAsync = promisify(execFile);

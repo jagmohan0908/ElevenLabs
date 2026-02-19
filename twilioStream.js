@@ -29,6 +29,12 @@ export function handleTwilioStream(twilioWs, log = console) {
     twilioWs.send(JSON.stringify(obj));
   }
 
+  /** Send audio to Twilio (must include streamSid for playback). */
+  function sendMediaToTwilio(payloadBase64) {
+    if (!streamSid) return;
+    sendToTwilio({ event: "media", streamSid, media: { payload: payloadBase64 } });
+  }
+
   function cleanup() {
     if (keepAliveInterval) {
       clearInterval(keepAliveInterval);
@@ -57,15 +63,34 @@ export function handleTwilioStream(twilioWs, log = console) {
           return;
         }
 
+        // Stream ElevenLabs greeting first (whole call feels natural)
+        const GREETING_TEXT = "Namaste, how can I help you today?";
+        (async () => {
+          try {
+            const mp3Buffer = await textToSpeech(GREETING_TEXT);
+            const mulawBuffer = await mp3ToMulaw8k(mp3Buffer);
+            for (let i = 0; i < mulawBuffer.length; i += TWILIO_MULAW_BYTES_PER_CHUNK) {
+              const chunk = mulawBuffer.subarray(i, i + TWILIO_MULAW_BYTES_PER_CHUNK);
+              if (chunk.length === 0) break;
+              const payload = chunk.length < TWILIO_MULAW_BYTES_PER_CHUNK
+                ? Buffer.concat([chunk, Buffer.alloc(TWILIO_MULAW_BYTES_PER_CHUNK - chunk.length, 0xff)])
+                : chunk;
+              sendMediaToTwilio(payload.toString("base64"));
+            }
+          } catch (e) {
+            log.warn({ e }, "Greeting TTS failed");
+          }
+        })();
+
         const deepgram = createClient(DEEPGRAM_API_KEY);
         deepgramLive = deepgram.listen.live({
           model: "nova-2",
           encoding: "mulaw",
           sample_rate: 8000,
-          language: "hi",
+          language: "en",
           punctuate: true,
           interim_results: true,
-          utterance_end_ms: 1000,
+          utterance_end_ms: 800,
         });
 
         deepgramLive.on(LiveTranscriptionEvents.Open, () => {
@@ -89,8 +114,12 @@ export function handleTwilioStream(twilioWs, log = console) {
 
         deepgramLive.on(LiveTranscriptionEvents.Transcript, (data) => {
           try {
-            const transcript = data?.channel?.alternatives?.[0]?.transcript ?? data?.alternatives?.[0]?.transcript ?? "";
-            const isFinal = data?.is_final === true || data?.speech_final === true;
+            const transcript =
+              data?.channel?.alternatives?.[0]?.transcript
+              ?? data?.results?.channels?.[0]?.alternatives?.[0]?.transcript
+              ?? data?.alternatives?.[0]?.transcript
+              ?? "";
+            const isFinal = data?.is_final === true;
             const speechFinal = data?.speech_final === true;
             if (!transcript || !String(transcript).trim()) return;
 
@@ -108,6 +137,14 @@ export function handleTwilioStream(twilioWs, log = console) {
             }
           } catch (e) {
             log.error({ e }, "Transcript handler error");
+          }
+        });
+
+        deepgramLive.on(LiveTranscriptionEvents.UtteranceEnd, () => {
+          if (pendingTranscript.trim()) {
+            const userText = pendingTranscript.trim();
+            pendingTranscript = "";
+            processTranscript(userText).catch((err) => log.error({ err }, "processTranscript error"));
           }
         });
 
