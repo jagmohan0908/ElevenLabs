@@ -84,13 +84,13 @@ export function handleTwilioStream(twilioWs, log = console) {
 
         const deepgram = createClient(DEEPGRAM_API_KEY);
         deepgramLive = deepgram.listen.live({
-          model: "nova-2",
+          model: "base",
           encoding: "mulaw",
           sample_rate: 8000,
-          language: "en",
+          language: "hi",
           punctuate: true,
           interim_results: true,
-          utterance_end_ms: 800,
+          utterance_end_ms: 1000,
         });
 
         deepgramLive.on(LiveTranscriptionEvents.Open, () => {

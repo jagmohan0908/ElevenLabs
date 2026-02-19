@@ -111,7 +111,7 @@ Set in `.env`:
 
 ## Technical notes
 
-- **Streaming STT:** Deepgram live API with `encoding=mulaw`, `sample_rate=8000`, `language=hi` (Hindi + English).
+- **Streaming STT:** Deepgram live API with `encoding=mulaw`, `sample_rate=8000`, `language=en`, model `base`.
 - **Context:** Each call keeps an in-memory conversation (user + assistant messages) for the duration of the WebSocket.
 - **Latency:** Aim for &lt; 1.5 s per response; streaming STT and turbo TTS help.
 - **Audio out:** ElevenLabs returns MP3; server converts to 8 kHz mono mulaw via ffmpeg and sends 20 ms chunks to Twilio.
@@ -126,3 +126,5 @@ Set in `.env`:
 4. Deploy. Set Twilio Voice URL to `https://<your-service>.onrender.com/twilio/voice`.
 
 **Note:** Free tier may spin down; first request after idle can be slow.
+
+**ElevenLabs 401 "Unusual activity" / "Free Tier usage disabled":** When the app runs from a cloud host (e.g. Render), ElevenLabs may block free-tier API use from datacenter IPs. To fix: use an ElevenLabs **paid plan**, or run the app from a residential network (e.g. local + ngrok) for testing.
