@@ -1,0 +1,5 @@
+.env
+.env.*
+audio_out/
+node_modules/
+*.wav
