@@ -204,20 +204,18 @@ app.get("/audio/:audioId.wav", async (request, reply) => {
 app.get("/health", async (_, reply) => reply.send({ status: "ok" }));
 
 // ----- Twilio: voice webhook (return TwiML with Media Stream) -----
-const TWILIO_GREETING = "Namaste, how can I help you today?";
 const TWILIO_STREAM_PATH = "/twilio-stream";
 const streamUrl = `${BASE_WS_URL.replace(/\/$/, "")}${TWILIO_STREAM_PATH}`;
 
+// Use <Connect><Stream> for BIDIRECTIONAL stream so we can send reply audio to the caller.
+// <Start><Stream> is unidirectional (receive only) – reply audio would never play.
 function twilioVoiceTwiML() {
   const streamUrlEscaped = streamUrl.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
-  const greetingEscaped = TWILIO_GREETING.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Start>
+  <Connect>
     <Stream url="${streamUrlEscaped}" />
-  </Start>
-  <Say>${greetingEscaped}</Say>
-  <Pause length="60"/>
+  </Connect>
 </Response>`;
 }
 

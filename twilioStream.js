@@ -188,6 +188,10 @@ export function handleTwilioStream(twilioWs, log = console) {
 
       const mp3Buffer = await textToSpeech(reply);
       const mulawBuffer = await mp3ToMulaw8k(mp3Buffer);
+      if (!mulawBuffer?.length) {
+        log.warn("TTS produced no audio, using fallback");
+        throw new Error("Empty TTS output");
+      }
 
       for (let i = 0; i < mulawBuffer.length; i += TWILIO_MULAW_BYTES_PER_CHUNK) {
         const chunk = mulawBuffer.subarray(i, i + TWILIO_MULAW_BYTES_PER_CHUNK);
@@ -211,7 +215,9 @@ export function handleTwilioStream(twilioWs, log = console) {
             : chunk;
           sendMediaToTwilio(payload.toString("base64"));
         }
-      } catch (_) {}
+      } catch (fallbackErr) {
+        log.warn({ err: fallbackErr }, "Fallback TTS also failed");
+      }
     } finally {
       isPlaying = false;
     }

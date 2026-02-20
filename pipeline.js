@@ -69,10 +69,11 @@ export async function aiResponseWithHistory(messages) {
 const FREE_TIER_VOICE_ID = "21m00Tcm4TlvDq8ikWAM";
 
 /** Free fallback TTS when ElevenLabs returns 401/403 (e.g. from cloud/datacenter). Uses Google Translate TTS. */
-async function googleTtsFallback(text, lang = "hi") {
+async function googleTtsFallback(text, preferredLang = "hi") {
   const t = String(text || "").trim();
   if (!t) throw new Error("googleTtsFallback: empty text");
-  const maxChunk = 200;
+  const lang = /^[\x00-\x7F\s.,?!;:'"-]+$/.test(t) ? "en" : preferredLang;
+  const maxChunk = 180;
   const chunks = [];
   for (let i = 0; i < t.length; i += maxChunk) {
     const part = t.slice(i, i + maxChunk);
@@ -83,7 +84,9 @@ async function googleTtsFallback(text, lang = "hi") {
       signal: AbortSignal.timeout(10000),
     });
     if (!res.ok) throw new Error(`Google TTS: ${res.status}`);
-    chunks.push(Buffer.from(await res.arrayBuffer()));
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length < 100) throw new Error("Google TTS: response too small (likely HTML)");
+    chunks.push(buf);
   }
   return Buffer.concat(chunks);
 }
@@ -136,7 +139,11 @@ export async function mp3ToMulaw8k(mp3Buffer) {
     }
     const chunks = [];
     ff.stdout.on("data", (chunk) => chunks.push(chunk));
-    ff.stdout.on("end", () => resolve(Buffer.concat(chunks)));
+    ff.stdout.on("end", () => {
+      const out = Buffer.concat(chunks);
+      if (!out.length) return reject(new Error("ffmpeg produced no output (invalid audio?)"));
+      resolve(out);
+    });
     if (ff.stderr) ff.stderr.on("data", () => {});
     ff.stdin.write(mp3Buffer);
     ff.stdin.end();
