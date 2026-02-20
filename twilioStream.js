@@ -23,6 +23,7 @@ export function handleTwilioStream(twilioWs, log = console) {
   const messages = [];
   let isPlaying = false;
   let pendingTranscript = "";
+  let ignoreTranscriptsUntil = 0;
 
   function sendToTwilio(obj) {
     if (twilioWs.readyState !== 1) return;
@@ -126,8 +127,13 @@ export function handleTwilioStream(twilioWs, log = console) {
             if (isFinal) {
               pendingTranscript = (pendingTranscript + " " + transcript).trim();
               if (speechFinal && pendingTranscript) {
-                const userText = pendingTranscript;
+                if (Date.now() < ignoreTranscriptsUntil) {
+                  pendingTranscript = "";
+                  return;
+                }
+                const userText = pendingTranscript.trim();
                 pendingTranscript = "";
+                if (userText.length < 2) return;
                 processTranscript(userText).catch((err) => {
                   log.error({ err }, "processTranscript error");
                 });
@@ -141,11 +147,14 @@ export function handleTwilioStream(twilioWs, log = console) {
         });
 
         deepgramLive.on(LiveTranscriptionEvents.UtteranceEnd, () => {
-          if (pendingTranscript.trim()) {
-            const userText = pendingTranscript.trim();
+          if (Date.now() < ignoreTranscriptsUntil) {
             pendingTranscript = "";
-            processTranscript(userText).catch((err) => log.error({ err }, "processTranscript error"));
+            return;
           }
+          const userText = pendingTranscript.trim();
+          pendingTranscript = "";
+          if (userText.length < 2) return;
+          processTranscript(userText).catch((err) => log.error({ err }, "processTranscript error"));
         });
 
         deepgramLive.on(LiveTranscriptionEvents.Metadata, () => {});
@@ -153,6 +162,7 @@ export function handleTwilioStream(twilioWs, log = console) {
       }
 
       if (event === "media" && msg.media?.payload && deepgramLive) {
+        if (isPlaying) return;
         const payload = Buffer.from(msg.media.payload, "base64");
         try {
           if (typeof deepgramLive.send === "function") {
@@ -220,6 +230,7 @@ export function handleTwilioStream(twilioWs, log = console) {
       }
     } finally {
       isPlaying = false;
+      ignoreTranscriptsUntil = Date.now() + 600;
     }
   }
 
