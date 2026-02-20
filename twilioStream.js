@@ -15,14 +15,41 @@ const FILLER_PHRASES = new Set([
   "sir", "ji", "जी", "है", "तो", "ok", "ठीक", "उम", "ओके", "um", "uh", "thank you", "thanks",
   "हाँ", "हां", "ना", "no", "yes", "the", "this", "that", "इसके बारे में", "बारे में",
   "सर", "सिर", "जी जी", "ji ji", "sir sir", "ok ok", "ठीक है", "theek hai", "मुझे मुझे है", "मुझे है",
+  "right", "so", "it", "i", "a", "the",
 ]);
+const MIN_REAL_LENGTH = 12;
+
 function isFillerOnly(text) {
   const t = text.replace(/\s+/g, " ").trim().toLowerCase();
-  if (t.length < 5) return true;
+  if (t.length < MIN_REAL_LENGTH) return true;
   const words = t.split(/\s+/).filter(Boolean);
   if (words.length === 1 && FILLER_PHRASES.has(t)) return true;
   const allFiller = words.every((w) => FILLER_PHRASES.has(w) || FILLER_PHRASES.has(w.replace(/[।?!.]/g, "")));
-  return allFiller && words.length <= 3;
+  if (allFiller && words.length <= 4) return true;
+  return false;
+}
+
+function isRepetitiveNoise(text) {
+  const words = text.replace(/\s+/g, " ").trim().split(/\s+/).filter(Boolean);
+  if (words.length < 3) return false;
+  const count = {};
+  for (const w of words) {
+    const k = w.toLowerCase().replace(/[।?!.]/g, "");
+    count[k] = (count[k] || 0) + 1;
+  }
+  const max = Math.max(...Object.values(count));
+  const repeatedWord = Object.entries(count).find(([, n]) => n === max)?.[0];
+  if (max >= 3 && max / words.length >= 0.6) {
+    if (FILLER_PHRASES.has(repeatedWord) || repeatedWord?.length <= 3) return true;
+  }
+  return false;
+}
+
+function shouldIgnoreTranscript(text) {
+  if (!text || text.trim().length < MIN_REAL_LENGTH) return true;
+  if (isFillerOnly(text)) return true;
+  if (isRepetitiveNoise(text)) return true;
+  return false;
 }
 
 /**
@@ -105,7 +132,7 @@ export function handleTwilioStream(twilioWs, log = console) {
           language: "hi",
           punctuate: true,
           interim_results: true,
-          utterance_end_ms: 1800,
+          utterance_end_ms: 2200,
         });
 
         deepgramLive.on(LiveTranscriptionEvents.Open, () => {
@@ -153,8 +180,7 @@ export function handleTwilioStream(twilioWs, log = console) {
           }
           const userText = pendingTranscript.trim();
           pendingTranscript = "";
-          if (!userText || userText.length < 5) return;
-          if (isFillerOnly(userText)) return;
+          if (shouldIgnoreTranscript(userText)) return;
           processTranscript(userText).catch((err) => log.error({ err }, "processTranscript error"));
         });
 
@@ -231,7 +257,7 @@ export function handleTwilioStream(twilioWs, log = console) {
       }
     } finally {
       isPlaying = false;
-      ignoreTranscriptsUntil = Date.now() + 600;
+      ignoreTranscriptsUntil = Date.now() + 1000;
     }
   }
 
