@@ -11,6 +11,20 @@ import { nehaResponseWithHistory, textToSpeech, mp3ToMulaw8k } from "./pipeline.
 
 const DEEPGRAM_KEEP_ALIVE_MS = 4000;
 
+const FILLER_PHRASES = new Set([
+  "sir", "ji", "जी", "है", "तो", "ok", "ठीक", "उम", "ओके", "um", "uh", "thank you", "thanks",
+  "हाँ", "हां", "ना", "no", "yes", "the", "this", "that", "इसके बारे में", "बारे में",
+  "सर", "सिर", "जी जी", "ji ji", "sir sir", "ok ok", "ठीक है", "theek hai", "मुझे मुझे है", "मुझे है",
+]);
+function isFillerOnly(text) {
+  const t = text.replace(/\s+/g, " ").trim().toLowerCase();
+  if (t.length < 5) return true;
+  const words = t.split(/\s+/).filter(Boolean);
+  if (words.length === 1 && FILLER_PHRASES.has(t)) return true;
+  const allFiller = words.every((w) => FILLER_PHRASES.has(w) || FILLER_PHRASES.has(w.replace(/[।?!.]/g, "")));
+  return allFiller && words.length <= 3;
+}
+
 /**
  * Handle one Twilio Media Streams WebSocket connection.
  * @param {import("ws").WebSocket} twilioWs - Twilio's WebSocket
@@ -91,7 +105,7 @@ export function handleTwilioStream(twilioWs, log = console) {
           language: "hi",
           punctuate: true,
           interim_results: true,
-          utterance_end_ms: 1000,
+          utterance_end_ms: 1800,
         });
 
         deepgramLive.on(LiveTranscriptionEvents.Open, () => {
@@ -121,23 +135,9 @@ export function handleTwilioStream(twilioWs, log = console) {
               ?? data?.alternatives?.[0]?.transcript
               ?? "";
             const isFinal = data?.is_final === true;
-            const speechFinal = data?.speech_final === true;
             if (!transcript || !String(transcript).trim()) return;
-
             if (isFinal) {
               pendingTranscript = (pendingTranscript + " " + transcript).trim();
-              if (speechFinal && pendingTranscript) {
-                if (Date.now() < ignoreTranscriptsUntil) {
-                  pendingTranscript = "";
-                  return;
-                }
-                const userText = pendingTranscript.trim();
-                pendingTranscript = "";
-                if (userText.length < 2) return;
-                processTranscript(userText).catch((err) => {
-                  log.error({ err }, "processTranscript error");
-                });
-              }
             } else {
               pendingTranscript = (pendingTranscript + " " + transcript).trim();
             }
@@ -153,7 +153,8 @@ export function handleTwilioStream(twilioWs, log = console) {
           }
           const userText = pendingTranscript.trim();
           pendingTranscript = "";
-          if (userText.length < 2) return;
+          if (!userText || userText.length < 5) return;
+          if (isFillerOnly(userText)) return;
           processTranscript(userText).catch((err) => log.error({ err }, "processTranscript error"));
         });
 
