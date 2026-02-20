@@ -70,10 +70,12 @@ const FREE_TIER_VOICE_ID = "21m00Tcm4TlvDq8ikWAM";
 
 /** Free fallback TTS when ElevenLabs returns 401/403 (e.g. from cloud/datacenter). Uses Google Translate TTS. */
 async function googleTtsFallback(text, lang = "hi") {
+  const t = String(text || "").trim();
+  if (!t) throw new Error("googleTtsFallback: empty text");
   const maxChunk = 200;
   const chunks = [];
-  for (let i = 0; i < text.length; i += maxChunk) {
-    const part = text.slice(i, i + maxChunk);
+  for (let i = 0; i < t.length; i += maxChunk) {
+    const part = t.slice(i, i + maxChunk);
     const q = encodeURIComponent(part);
     const url = `https://translate.google.com/translate_tts?ie=UTF-8&tl=${lang}&client=tw-ob&q=${q}`;
     const res = await fetch(url, {
@@ -115,17 +117,27 @@ const execFileAsync = promisify(execFile);
  * Convert MP3 buffer to 8kHz mono mu-law raw for Twilio Media Streams (requires ffmpeg on PATH).
  */
 export async function mp3ToMulaw8k(mp3Buffer) {
+  if (!mp3Buffer || !mp3Buffer.length) {
+    return Promise.reject(new Error("mp3ToMulaw8k: empty input"));
+  }
   return new Promise((resolve, reject) => {
     const ff = spawn(
       "ffmpeg",
       ["-i", "pipe:0", "-f", "mulaw", "-ar", "8000", "-ac", "1", "pipe:1"],
       { stdio: ["pipe", "pipe", "ignore"] }
     );
+    ff.on("error", reject);
+    ff.on("close", (code) => {
+      if (code !== 0 && code !== null) reject(new Error(`ffmpeg exited with code ${code}`));
+    });
+    if (!ff.stdout || !ff.stdin) {
+      reject(new Error("ffmpeg spawn: missing stdout or stdin"));
+      return;
+    }
     const chunks = [];
     ff.stdout.on("data", (chunk) => chunks.push(chunk));
     ff.stdout.on("end", () => resolve(Buffer.concat(chunks)));
-    ff.on("error", reject);
-    ff.stderr.on("data", () => {});
+    if (ff.stderr) ff.stderr.on("data", () => {});
     ff.stdin.write(mp3Buffer);
     ff.stdin.end();
   });

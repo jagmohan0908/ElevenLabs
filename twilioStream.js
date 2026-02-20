@@ -195,7 +195,7 @@ export function handleTwilioStream(twilioWs, log = console) {
         const payload = chunk.length < TWILIO_MULAW_BYTES_PER_CHUNK
           ? Buffer.concat([chunk, Buffer.alloc(TWILIO_MULAW_BYTES_PER_CHUNK - chunk.length, 0xff)])
           : chunk;
-        sendToTwilio({ event: "media", media: { payload: payload.toString("base64") } });
+        sendMediaToTwilio(payload.toString("base64"));
       }
     } catch (err) {
       log.error({ err }, "TTS or AI error");
@@ -209,7 +209,7 @@ export function handleTwilioStream(twilioWs, log = console) {
           const payload = chunk.length < TWILIO_MULAW_BYTES_PER_CHUNK
             ? Buffer.concat([chunk, Buffer.alloc(TWILIO_MULAW_BYTES_PER_CHUNK - chunk.length, 0xff)])
             : chunk;
-          sendToTwilio({ event: "media", media: { payload: payload.toString("base64") } });
+          sendMediaToTwilio(payload.toString("base64"));
         }
       } catch (_) {}
     } finally {
