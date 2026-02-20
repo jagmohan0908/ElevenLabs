@@ -7,7 +7,7 @@ import {
   DEEPGRAM_API_KEY,
   TWILIO_MULAW_BYTES_PER_CHUNK,
 } from "./config.js";
-import { aiResponseWithHistory, textToSpeech, mp3ToMulaw8k } from "./pipeline.js";
+import { nehaResponseWithHistory, textToSpeech, mp3ToMulaw8k } from "./pipeline.js";
 
 const DEEPGRAM_KEEP_ALIVE_MS = 4000;
 
@@ -64,8 +64,8 @@ export function handleTwilioStream(twilioWs, log = console) {
           return;
         }
 
-        // Stream ElevenLabs greeting first (whole call feels natural)
-        const GREETING_TEXT = "Namaste, how can I help you today?";
+        // Stream greeting as Neha from Siya Ayurveda
+        const GREETING_TEXT = "Hello, mai Siya Ayurveda se Neha baat kar rahi hoon. Mai aapki kaisi sahayata kar sakti hoon?";
         (async () => {
           try {
             const mp3Buffer = await textToSpeech(GREETING_TEXT);
@@ -192,7 +192,7 @@ export function handleTwilioStream(twilioWs, log = console) {
     log.info({ userText: userText.slice(0, 100) }, "User said");
 
     try {
-      const reply = await aiResponseWithHistory(messages);
+      const reply = await nehaResponseWithHistory(messages);
       messages.push({ role: "assistant", content: reply });
       log.info({ reply: reply.slice(0, 100) }, "AI reply");
 

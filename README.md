@@ -60,8 +60,12 @@ Create a `.env` file:
 | `TWILIO_ACCOUNT_SID` | (For "Call me") From Twilio Console → Account Info |
 | `TWILIO_AUTH_TOKEN` | (For "Call me") From Twilio Console → Account Info |
 | `TWILIO_PHONE_NUMBER` | (For "Call me") Your Twilio number in E.164 (e.g. `+1234567890`) |
+| `SHOPIFY_STORE` | (Neha/Siya Ayurveda) Your Shopify store host, e.g. `your-store.myshopify.com` |
+| `SHOPIFY_ACCESS_TOKEN` | (Neha/Siya Ayurveda) Shopify Admin API access token (e.g. `shpat_...`) for products and draft orders |
 
 **Exotel (optional, legacy):** `EXOTEL_*` variables only if you still use Exotel endpoints.
+
+**Siya Ayurveda (Neha) agent:** When `SHOPIFY_STORE` and `SHOPIFY_ACCESS_TOKEN` are set, the voice agent acts as "Neha" from Siya Ayurveda: natural Hinglish, product lookup via Shopify, and draft order creation when the customer is ready to buy (after collecting name, address, phone, payment preference).
 
 ---
 

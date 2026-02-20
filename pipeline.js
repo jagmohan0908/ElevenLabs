@@ -17,6 +17,7 @@ import {
   ELEVENLABS_API_KEY,
   ELEVENLABS_VOICE_ID,
 } from "./config.js";
+import { getProducts, getProductById, createDraftOrder } from "./shopify.js";
 
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 const elevenlabs = new ElevenLabsClient({ apiKey: ELEVENLABS_API_KEY });
@@ -40,6 +41,140 @@ export async function speechToText(audioBuffer) {
 const SYSTEM_PROMPT =
   "You are a helpful voice assistant. Reply in 1-3 short sentences. Be clear and concise for phone playback. Support Hindi and English.";
 
+const NEHA_SYSTEM_PROMPT = `You are Neha, a real person on a phone call from Siya Ayurveda. You speak naturally in Hindi and English (Hinglish) like a friendly shop assistant. Keep replies short for a call: 1-3 sentences. Be warm and human.
+
+When the customer asks about products, use the get_products tool (with optional search query) to fetch real products, then describe them in a natural way and ask if they want to know more or order.
+When they want to buy, ask for: full name, full address (address line, city, state, pincode), phone, and how they want to pay (COD, online, etc.). Then use create_draft_order with the collected details to create their order. Confirm the order and tell them next steps (e.g. we will send payment link / COD confirmation).
+
+Always sound like a real person on a call—use "ji", "bilkul", "theek hai", natural fillers. Never sound like a robot or list bullet points.`;
+
+const SHOPIFY_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "get_products",
+      description: "Fetch products from Siya Ayurveda store. Use when customer asks what products we have, or to search by name.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Optional search term (product name or keyword)" },
+          limit: { type: "number", description: "Max products to return (default 15)" },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_product",
+      description: "Get details of one product by ID. Use after listing products when customer asks about a specific product.",
+      parameters: {
+        type: "object",
+        properties: { product_id: { type: "number", description: "Shopify product ID" } },
+        required: ["product_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_draft_order",
+      description: "Create a draft order for the customer. Call only after you have collected: full name, full address (address1, city, province, country, zip), phone, and at least one line item (variant_id and quantity).",
+      parameters: {
+        type: "object",
+        properties: {
+          line_items: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { variant_id: { type: "number" }, quantity: { type: "number" } },
+              required: ["variant_id", "quantity"],
+            },
+            description: "Items to order: variant_id from product, quantity",
+          },
+          first_name: { type: "string" },
+          last_name: { type: "string" },
+          address1: { type: "string" },
+          city: { type: "string" },
+          province: { type: "string", description: "State" },
+          country: { type: "string", description: "e.g. India" },
+          zip: { type: "string", description: "Pincode" },
+          phone: { type: "string" },
+          note: { type: "string", description: "Payment method or customer note" },
+        },
+        required: ["line_items", "first_name", "last_name", "address1", "city", "country", "zip", "phone"],
+      },
+    },
+  },
+];
+
+async function runTool(name, args) {
+  if (name === "get_products") {
+    const { products, error } = await getProducts(args?.limit || 15, args?.query || "");
+    return JSON.stringify(error ? { error } : { products: products.slice(0, 15) });
+  }
+  if (name === "get_product") {
+    const { product, error } = await getProductById(args?.product_id);
+    return JSON.stringify(error ? { error } : { product });
+  }
+  if (name === "create_draft_order") {
+    const shippingAddress = {
+      first_name: args?.first_name || "",
+      last_name: args?.last_name || "",
+      address1: args?.address1 || "",
+      city: args?.city || "",
+      province: args?.province || "",
+      country: args?.country || "India",
+      zip: args?.zip || "",
+      phone: args?.phone || "",
+    };
+    const { draft_order, error } = await createDraftOrder({
+      lineItems: args?.line_items || [],
+      shippingAddress,
+      note: args?.note || "",
+    });
+    return JSON.stringify(error ? { error } : { draft_order, invoice_url: draft_order?.invoice_url });
+  }
+  return JSON.stringify({ error: "Unknown tool" });
+}
+
+/** Agentic turn: chat with tools (Shopify) for Neha. Returns final assistant message text. */
+export async function nehaResponseWithHistory(messages) {
+  const allMessages = [{ role: "system", content: NEHA_SYSTEM_PROMPT }, ...messages];
+  let maxTurns = 8;
+  while (maxTurns-- > 0) {
+    const r = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: allMessages,
+      tools: SHOPIFY_TOOLS,
+      tool_choice: "auto",
+      max_tokens: 300,
+    });
+    const msg = r.choices[0]?.message;
+    if (!msg) return "Sorry, main abhi respond nahi de paayi. Phir try karein.";
+    if (msg.tool_calls?.length) {
+      allMessages.push(msg);
+      for (const tc of msg.tool_calls) {
+        const name = tc.function?.name;
+        let args = {};
+        try {
+          args = JSON.parse(tc.function?.arguments || "{}");
+        } catch (_) {}
+        const result = await runTool(name, args);
+        allMessages.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: result,
+        });
+      }
+      continue;
+    }
+    const text = msg.content?.trim();
+    return text || "Aur bataiye, main kaise help kar sakti hoon?";
+  }
+  return "Thoda time lagega, baad mein phir try karein.";
+}
+
 export async function aiResponse(userText) {
   if (!userText || !String(userText).trim()) {
     return "I didn't catch that. Please call again and say your question clearly.";
@@ -55,7 +190,7 @@ export async function aiResponse(userText) {
   return r.choices[0]?.message?.content || "I'm sorry, I couldn't generate a response.";
 }
 
-/** AI response with full conversation history (for real-time call context + interrupt handling). */
+/** AI response with full conversation history (generic assistant). */
 export async function aiResponseWithHistory(messages) {
   const r = await openai.chat.completions.create({
     model: "gpt-4o-mini",
